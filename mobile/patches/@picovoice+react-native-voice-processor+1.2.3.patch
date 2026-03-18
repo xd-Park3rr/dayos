@@ -1,8 +1,77 @@
+diff --git a/node_modules/@picovoice/react-native-voice-processor/android/src/main/java/ai/picovoice/reactnative/voiceprocessor/VoiceProcessorPackage.java b/node_modules/@picovoice/react-native-voice-processor/android/src/main/java/ai/picovoice/reactnative/voiceprocessor/VoiceProcessorPackage.java
+index afb5317..3b60bf5 100644
+--- a/node_modules/@picovoice/react-native-voice-processor/android/src/main/java/ai/picovoice/reactnative/voiceprocessor/VoiceProcessorPackage.java
++++ b/node_modules/@picovoice/react-native-voice-processor/android/src/main/java/ai/picovoice/reactnative/voiceprocessor/VoiceProcessorPackage.java
+@@ -1,26 +1,31 @@
+ package ai.picovoice.reactnative.voiceprocessor;
+ 
+ import androidx.annotation.NonNull;
++import androidx.annotation.Nullable;
+ 
+-import com.facebook.react.ReactPackage;
++import com.facebook.react.TurboReactPackage;
+ import com.facebook.react.bridge.NativeModule;
+ import com.facebook.react.bridge.ReactApplicationContext;
++import com.facebook.react.module.model.ReactModuleInfo;
++import com.facebook.react.module.model.ReactModuleInfoProvider;
+ import com.facebook.react.uimanager.ViewManager;
+ 
+-import java.util.ArrayList;
+ import java.util.Collections;
++import java.util.HashMap;
+ import java.util.List;
++import java.util.Map;
+ 
+ /**
+  * VoiceProcessorPackage class.
+  */
+-public class VoiceProcessorPackage implements ReactPackage {
+-    @NonNull
++public class VoiceProcessorPackage extends TurboReactPackage {
+     @Override
+-    public List<NativeModule> createNativeModules(@NonNull ReactApplicationContext reactContext) {
+-        List<NativeModule> modules = new ArrayList<>();
+-        modules.add(new VoiceProcessorModule(reactContext));
+-        return modules;
++    @Nullable
++    public NativeModule getModule(String name, ReactApplicationContext reactContext) {
++        if (VoiceProcessorModule.NAME.equals(name)) {
++            return new VoiceProcessorModule(reactContext);
++        }
++        return null;
+     }
+ 
+     @NonNull
+@@ -28,4 +33,24 @@ public class VoiceProcessorPackage implements ReactPackage {
+     public List<ViewManager> createViewManagers(@NonNull ReactApplicationContext reactContext) {
+         return Collections.emptyList();
+     }
++
++    @Override
++    public ReactModuleInfoProvider getReactModuleInfoProvider() {
++        return () -> {
++            final Map<String, ReactModuleInfo> moduleInfos = new HashMap<>();
++            moduleInfos.put(
++                VoiceProcessorModule.NAME,
++                new ReactModuleInfo(
++                    VoiceProcessorModule.NAME,
++                    VoiceProcessorModule.NAME,
++                    false,
++                    false,
++                    true,
++                    false,
++                    false
++                )
++            );
++            return moduleInfos;
++        };
++    }
+ }
 diff --git a/node_modules/@picovoice/react-native-voice-processor/src/voice_processor.tsx b/node_modules/@picovoice/react-native-voice-processor/src/voice_processor.tsx
-index 9db4e85..599d7be 100644
+index 80d5cca..79e31f8 100644
 --- a/node_modules/@picovoice/react-native-voice-processor/src/voice_processor.tsx
 +++ b/node_modules/@picovoice/react-native-voice-processor/src/voice_processor.tsx
-@@ -10,6 +10,14 @@
+@@ -12,6 +12,14 @@
  import { NativeEventEmitter, NativeModules } from 'react-native';
  import { VoiceProcessorError } from './voice_processor_errors';
  
@@ -17,7 +86,7 @@ index 9db4e85..599d7be 100644
  /**
   * Type for callback functions that receive audio frames from the VoiceProcessor.
   */
-@@ -31,14 +39,15 @@ class VoiceProcessor {
+@@ -37,9 +45,10 @@ class VoiceProcessor {
     * Private constructor.
     */
    private constructor() {
@@ -30,10 +99,7 @@ index 9db4e85..599d7be 100644
        async (frame: number[]) => {
          this._frameListeners.forEach(
            (listener: VoiceProcessorFrameListener) => {
-             listener(frame);
-           }
-         );
-       }
+@@ -50,7 +59,7 @@ class VoiceProcessor {
      );
  
      this._eventEmitter.addListener(
@@ -42,7 +108,7 @@ index 9db4e85..599d7be 100644
        async (error: string) => {
          let voiceProcessorError = new VoiceProcessorError(error);
          this._errorListeners.forEach(
-@@ -142,7 +151,7 @@ class VoiceProcessor {
+@@ -162,7 +171,7 @@ class VoiceProcessor {
     * @returns A promise that resolves when recording starts.
     */
    public async start(frameLength: number, sampleRate: number): Promise<void> {
@@ -51,7 +117,7 @@ index 9db4e85..599d7be 100644
    }
  
    /**
-@@ -150,7 +159,7 @@ class VoiceProcessor {
+@@ -170,7 +179,7 @@ class VoiceProcessor {
     * @returns A promise that resolves when recording stops.
     */
    public async stop(): Promise<void> {
@@ -60,7 +126,7 @@ index 9db4e85..599d7be 100644
    }
  
    /**
-@@ -158,7 +167,7 @@ class VoiceProcessor {
+@@ -178,7 +187,7 @@ class VoiceProcessor {
     * @returns A promise that resolves with a boolean indicating recording status.
     */
    public async isRecording(): Promise<boolean> {
@@ -69,7 +135,7 @@ index 9db4e85..599d7be 100644
    }
  
    /**
-@@ -166,7 +175,7 @@ class VoiceProcessor {
+@@ -186,7 +195,7 @@ class VoiceProcessor {
     * @returns A promise that resolves with a boolean indicating permission status.
     */
    public async hasRecordAudioPermission(): Promise<boolean> {

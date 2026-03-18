@@ -1,25 +1,43 @@
+import { DeviceEventEmitter, NativeModules, type EmitterSubscription } from 'react-native';
 import { getDb } from '../../db/client';
 import { bus } from '../../events/bus';
 
-const loadBluetoothModule = async (): Promise<any | null> => {
-  try {
-    const commonJsModule = require('react-native-bluetooth-classic') as Record<string, unknown>;
-    const moduleValue = (commonJsModule.default as Record<string, unknown> | undefined) || commonJsModule;
-    if (typeof moduleValue?.isBluetoothAvailable !== 'function') {
-      return null;
-    }
+type BluetoothDeviceEvent = {
+  device?: {
+    name?: string;
+    address?: string;
+  };
+};
 
-    return moduleValue;
-  } catch (e) {
-    console.warn('[BT Context] Bluetooth native module is unavailable in this runtime.', e);
+type NativeBluetoothModule = {
+  isBluetoothAvailable: () => Promise<boolean>;
+  getBondedDevices: () => Promise<any[]>;
+};
+
+type BluetoothModule = NativeBluetoothModule & {
+  onDeviceConnected: (listener: (event: BluetoothDeviceEvent) => void) => EmitterSubscription;
+  onDeviceDisconnected: (listener: (event: BluetoothDeviceEvent) => void) => EmitterSubscription;
+};
+
+const loadBluetoothModule = (): BluetoothModule | null => {
+  const nativeModule = NativeModules.RNBluetoothClassic as NativeBluetoothModule | undefined;
+  if (!nativeModule || typeof nativeModule.isBluetoothAvailable !== 'function') {
+    console.warn('[BT Context] Bluetooth native module is unavailable in this runtime.');
     return null;
   }
+
+  return {
+    ...nativeModule,
+    onDeviceConnected: (listener) => DeviceEventEmitter.addListener('deviceConnected', listener),
+    onDeviceDisconnected: (listener) =>
+      DeviceEventEmitter.addListener('deviceDisconnected', listener),
+  };
 };
 
 export const bluetoothContext = {
   startMonitoring: async () => {
     try {
-      const RNBluetoothClassic = await loadBluetoothModule();
+      const RNBluetoothClassic = loadBluetoothModule();
       if (!RNBluetoothClassic) {
         return;
       }
@@ -61,7 +79,7 @@ export const bluetoothContext = {
   
   getBondedDevices: async () => {
     try {
-      const RNBluetoothClassic = await loadBluetoothModule();
+      const RNBluetoothClassic = loadBluetoothModule();
       if (!RNBluetoothClassic) {
         return [];
       }

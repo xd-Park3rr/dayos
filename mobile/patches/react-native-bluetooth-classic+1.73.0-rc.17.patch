@@ -1,0 +1,103 @@
+diff --git a/node_modules/react-native-bluetooth-classic/android/src/main/java/kjd/reactnative/bluetooth/RNBluetoothClassicModule.java b/node_modules/react-native-bluetooth-classic/android/src/main/java/kjd/reactnative/bluetooth/RNBluetoothClassicModule.java
+index f994a0a..279e23a 100644
+--- a/node_modules/react-native-bluetooth-classic/android/src/main/java/kjd/reactnative/bluetooth/RNBluetoothClassicModule.java
++++ b/node_modules/react-native-bluetooth-classic/android/src/main/java/kjd/reactnative/bluetooth/RNBluetoothClassicModule.java
+@@ -30,6 +30,7 @@ import com.facebook.react.bridge.ReactMethod;
+ import com.facebook.react.bridge.ReadableMap;
+ import com.facebook.react.bridge.WritableArray;
+ import com.facebook.react.bridge.WritableMap;
++import com.facebook.react.module.annotations.ReactModule;
+ import com.facebook.react.modules.core.DeviceEventManagerModule;
+ 
+ import java.io.IOException;
+@@ -88,6 +89,7 @@ import kjd.reactnative.bluetooth.receiver.StateChangeReceiver;
+  * @author kendavidson
+  */
+ @SuppressWarnings({ "WeakerAccess" })
++@ReactModule(name = RNBluetoothClassicModule.MODULE_NAME)
+ public class RNBluetoothClassicModule
+         extends ReactContextBaseJavaModule
+         implements ActivityEventListener,
+diff --git a/node_modules/react-native-bluetooth-classic/android/src/main/java/kjd/reactnative/bluetooth/RNBluetoothClassicPackage.java b/node_modules/react-native-bluetooth-classic/android/src/main/java/kjd/reactnative/bluetooth/RNBluetoothClassicPackage.java
+index 7ed1dab..f0cb576 100644
+--- a/node_modules/react-native-bluetooth-classic/android/src/main/java/kjd/reactnative/bluetooth/RNBluetoothClassicPackage.java
++++ b/node_modules/react-native-bluetooth-classic/android/src/main/java/kjd/reactnative/bluetooth/RNBluetoothClassicPackage.java
+@@ -7,9 +7,14 @@ import java.util.HashMap;
+ import java.util.List;
+ import java.util.Map;
+ 
+-import com.facebook.react.ReactPackage;
++import androidx.annotation.NonNull;
++import androidx.annotation.Nullable;
++
++import com.facebook.react.TurboReactPackage;
+ import com.facebook.react.bridge.NativeModule;
+ import com.facebook.react.bridge.ReactApplicationContext;
++import com.facebook.react.module.model.ReactModuleInfo;
++import com.facebook.react.module.model.ReactModuleInfoProvider;
+ import com.facebook.react.uimanager.ViewManager;
+ import com.facebook.react.bridge.JavaScriptModule;
+ 
+@@ -28,7 +33,7 @@ import kjd.reactnative.bluetooth.conn.ByteArrayDeviceConnectionImpl;
+  * @author kenjdavidson
+  *
+  */
+-public class RNBluetoothClassicPackage implements ReactPackage {
++public class RNBluetoothClassicPackage extends TurboReactPackage {
+ 
+     /**
+      * Provides a default builder to allow for overriding.
+@@ -97,10 +102,17 @@ public class RNBluetoothClassicPackage implements ReactPackage {
+      * @return array of modules provided by this package
+      */
+     @Override
+-    public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
+-        RNBluetoothClassicModule module = new RNBluetoothClassicModule(reactContext,
+-                mAcceptorFactories, mConnectorFactories, mConnectionFactories);
+-        return Arrays.<NativeModule>asList(module);
++    @Nullable
++    public NativeModule getModule(String name, ReactApplicationContext reactContext) {
++        if (RNBluetoothClassicModule.MODULE_NAME.equals(name)) {
++            return new RNBluetoothClassicModule(
++                reactContext,
++                mAcceptorFactories,
++                mConnectorFactories,
++                mConnectionFactories
++            );
++        }
++        return null;
+     }
+ 
+     /**
+@@ -118,10 +130,31 @@ public class RNBluetoothClassicPackage implements ReactPackage {
+      * @return empty list of {@link ViewManager}(s)
+      */
+     @Override
++    @NonNull
+     public List<ViewManager> createViewManagers(ReactApplicationContext reactContext) {
+         return Collections.emptyList();
+     }
+ 
++    @Override
++    public ReactModuleInfoProvider getReactModuleInfoProvider() {
++        return () -> {
++            final Map<String, ReactModuleInfo> moduleInfos = new HashMap<>();
++            moduleInfos.put(
++                RNBluetoothClassicModule.MODULE_NAME,
++                new ReactModuleInfo(
++                    RNBluetoothClassicModule.MODULE_NAME,
++                    RNBluetoothClassicModule.MODULE_NAME,
++                    false,
++                    false,
++                    true,
++                    false,
++                    false
++                )
++            );
++            return moduleInfos;
++        };
++    }
++
+     /**
+      * Provides a {@link Builder}.
+      *

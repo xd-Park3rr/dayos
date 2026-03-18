@@ -1,3 +1,5 @@
+import { Image } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { TranscribeOptions, WhisperContext, WhisperVadContext } from 'whisper.rn';
 import { microphonePermission } from './microphonePermission';
 
@@ -7,6 +9,7 @@ const FALLBACK_WHISPER_MODEL_ASSET = require('../../../assets/models/ggml-tiny.e
 const DEFAULT_VAD_MODEL_ASSET = require('../../../assets/models/ggml-silero-v6.2.0.bin');
 const COMMAND_CAPTURE_MS = 6500;
 const RESULT_DEBOUNCE_MS = 1100;
+const MIN_VALID_MODEL_BYTES = 1024 * 1024;
 const COMMAND_PROMPT =
   'The speaker is talking to a personal assistant named Jarvis. Expect short English voice commands and questions about schedule, blocks, done, defer, skip, time, calendar, today, tomorrow, and can you hear me.';
 
@@ -206,6 +209,61 @@ const resolveModelCandidates = (): Array<{
   ];
 };
 
+const getCandidateLocalUri = (options: { filePath: string | number; isBundleAsset?: boolean }): string | null => {
+  if (typeof options.filePath === 'number') {
+    try {
+      const source = Image.resolveAssetSource(options.filePath);
+      if (!source?.uri || source.uri.startsWith('http://') || source.uri.startsWith('https://')) {
+        return null;
+      }
+      return source.uri;
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof options.filePath === 'string' && options.filePath.startsWith('file://')) {
+    return options.filePath;
+  }
+
+  if (typeof options.filePath === 'string' && options.filePath.startsWith('/')) {
+    return `file://${options.filePath}`;
+  }
+
+  return null;
+};
+
+const validateModelCandidate = async (
+  label: string,
+  options: { filePath: string | number; isBundleAsset?: boolean }
+): Promise<boolean> => {
+  const localUri = getCandidateLocalUri(options);
+  if (!localUri) {
+    return true;
+  }
+
+  try {
+    const info = await FileSystem.getInfoAsync(localUri);
+    if (!info.exists || typeof info.size !== 'number') {
+      return true;
+    }
+
+    if (info.size >= MIN_VALID_MODEL_BYTES) {
+      return true;
+    }
+
+    console.warn(
+      `[STT] Whisper model "${label}" is only ${info.size} bytes. This is not a valid Whisper model. ` +
+        'The dev client likely cached a stale Metro asset or a Git LFS pointer. Restart Metro with ' +
+        '`npx expo start --dev-client -c`, clear the app cache if needed, and reopen DayOS.'
+    );
+    return false;
+  } catch (error) {
+    console.warn(`[STT] Failed to inspect Whisper model candidate ${label}. Continuing anyway.`, error);
+    return true;
+  }
+};
+
 const combineTranscriptSegments = (segments: Map<number, string>): string => {
   return Array.from(segments.entries())
     .sort((a, b) => a[0] - b[0])
@@ -234,6 +292,11 @@ export const sttService = {
         }
 
         for (const candidate of resolveModelCandidates()) {
+          const isCandidateValid = await validateModelCandidate(candidate.label, candidate.options);
+          if (!isCandidateValid) {
+            continue;
+          }
+
           try {
             whisperContext = await whisper.initWhisper(candidate.options);
             console.log(`[STT] Whisper initialized successfully using ${candidate.label}`);
