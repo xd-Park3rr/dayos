@@ -1,0 +1,1 @@
+Placeholder, will later be a unified backend for all DayOS services, including mobile and desktop. For now, it can be used for mobile-specific agents and tools that don't belong in the shared codebase

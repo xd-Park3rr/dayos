@@ -61,6 +61,12 @@ export function ChatScreen() {
 
   const isLastMessageAssistant =
     messages.length > 0 && messages[messages.length - 1].role === 'assistant';
+  const lastAssistantMetadata =
+    isLastMessageAssistant ? messages[messages.length - 1].metadata || null : null;
+  const awaitingConfirmation =
+    !!lastAssistantMetadata &&
+    typeof lastAssistantMetadata === 'object' &&
+    lastAssistantMetadata.status === 'awaiting_confirmation';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
@@ -140,15 +146,28 @@ export function ChatScreen() {
                 style={styles.quickReplies}
                 contentContainerStyle={styles.quickReplyContent}
               >
-                <TouchableOpacity style={styles.chip} onPress={() => handleSend("I'll go")}>
-                  <Text style={styles.chipText}>{"I'll go"}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.chip} onPress={() => handleSend('Reschedule it')}>
-                  <Text style={styles.chipText}>Reschedule it</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.chip} onPress={() => handleSend('Override skip')}>
-                  <Text style={styles.chipText}>Override skip</Text>
-                </TouchableOpacity>
+                {awaitingConfirmation ? (
+                  <>
+                    <TouchableOpacity style={styles.chip} onPress={() => handleSend('Confirm')}>
+                      <Text style={styles.chipText}>Confirm</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.chip} onPress={() => handleSend('Cancel')}>
+                      <Text style={styles.chipText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <TouchableOpacity style={styles.chip} onPress={() => handleSend("What's next?")}>
+                      <Text style={styles.chipText}>{"What's next?"}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.chip} onPress={() => handleSend('Show my schedule')}>
+                      <Text style={styles.chipText}>Show schedule</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.chip} onPress={() => handleSend('Check permissions')}>
+                      <Text style={styles.chipText}>Check setup</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </ScrollView>
             )}
 

@@ -141,7 +141,7 @@ const handleText = async (
   }
 
   const history = useChatStore.getState().messages.slice(-20);
-  const result = await osIntentRouter.processText(trimmed, history);
+  const result = await osIntentRouter.processText(trimmed, history, source);
 
   if (source === 'voice' && result.intent !== 'coach.chat') {
     setSessionState('acting');

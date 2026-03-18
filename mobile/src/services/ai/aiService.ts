@@ -1,6 +1,9 @@
 import { COACH_SYSTEM } from '../../constants';
 import type { ChatContentPart, ChatMessage } from './chatTypes';
 import type { CoachTone, MomentumSummary, Severity } from '../../types';
+import type { CommandPlan, CommandStep } from '../assistant/types';
+import { getCatalogPrompt, withCommandDefaults } from '../assistant/commandCatalog';
+import { createAssistantId } from '../assistant/utils';
 
 const ANTHROPIC_API_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
 const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
@@ -189,11 +192,18 @@ export const aiService = {
   
   buildContextSnapshot: (): string => {
     try {
-      const { activityRepo, driftRepo, diaryRepo } = require('../../db/repositories');
+      const { activityRepo, driftRepo, diaryRepo, calendarCacheRepo, taskRepo } = require('../../db/repositories');
       const blocks = activityRepo.getTodaysBlocks();
       const themes = diaryRepo.getRecentThemes();
       const drifts = driftRepo.getSummary();
       const momentum = activityRepo.getMomentumSummaries();
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      end.setMilliseconds(end.getMilliseconds() - 1);
+      const calendarEvents = calendarCacheRepo.listRange(start.toISOString(), end.toISOString());
+      const tasks = taskRepo.query({ startAt: start.toISOString(), endAt: end.toISOString() });
       const normalizedBlocks = normaliseBlocksForCoach(blocks);
       
       return `${buildTemporalContextSnapshot()}
@@ -202,10 +212,97 @@ CONTEXT SNAPSHOT:
 Momentum: ${JSON.stringify(momentum)}
 Categories and drift: ${JSON.stringify(drifts)}
 Today's Scheduled Blocks: ${JSON.stringify(normalizedBlocks)}
+Today's Calendar Events: ${JSON.stringify(calendarEvents)}
+Today's Tasks: ${JSON.stringify(tasks)}
 Diary Themes (last 7 days): ${themes.join(', ')}
       `;
     } catch(e) {
       return 'Context missing.';
+    }
+  },
+
+  planCommands: async (input: string, history: ChatMessage[] = []): Promise<CommandPlan> => {
+    const localPlan = buildLocalCommandPlan(input);
+    if (!ANTHROPIC_API_KEY) {
+      return localPlan;
+    }
+
+    const historyContext = history.length > 0
+      ? `\nRECENT CONVERSATION:\n${history
+          .slice(-8)
+          .map((entry) => `${entry.role.toUpperCase()}: ${contentToText(entry.content)}`)
+          .join('\n')}\n`
+      : '';
+
+    const systemPrompt = `${buildTemporalContextSnapshot()}
+${historyContext}
+
+You are the Android-only command planner for DayOS.
+Return strict JSON only, never markdown.
+
+You must convert the user's single utterance into one or more command steps.
+The user may ask for more than one thing at once.
+Use only the command catalog below:
+${getCatalogPrompt()}
+
+Rules:
+- Prefer command steps over prose when the request can be executed or queried.
+- Use multiple steps when the user asked for multiple actions.
+- For fuzzy targets, keep the user's query in params (for example "titleQuery", "contactQuery", "appQuery") rather than inventing IDs.
+- Use ISO datetime strings when you can infer them confidently. Otherwise keep a clear phrase like "today 4 pm" in params.
+- If the request is purely conversational and should not run commands, return zero steps and set coachPrompt.
+- Do not create unsupported commands.
+- Android only. Do not mention iOS.
+
+Schema:
+{
+  "summary": "short execution summary",
+  "coachPrompt": "optional fallback prompt or null",
+  "steps": [
+    {
+      "namespace": "calendar|task|activity|insight|contacts|communication|app|permission",
+      "command": "catalog command",
+      "humanSummary": "short human-readable step label",
+      "params": { "any": "json object" },
+      "dependsOn": ["optional_step_id"]
+    }
+  ]
+}`;
+
+    try {
+      const response = await callAnthropic({
+        maxTokens: 1200,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: input }],
+      });
+      const normalized = response
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+      const parsed = JSON.parse(normalized) as {
+        summary?: string;
+        coachPrompt?: string | null;
+        steps?: Array<{
+          namespace: CommandStep['namespace'];
+          command: string;
+          humanSummary?: string;
+          params?: Record<string, unknown>;
+          dependsOn?: string[];
+        }>;
+      };
+
+      const runId = createAssistantId('run');
+      const normalizedSteps = normalizePlannedSteps(parsed.steps || [], runId);
+      return {
+        runId,
+        summary: parsed.summary?.trim() || (normalizedSteps.length > 0 ? 'Working on your request.' : 'No device commands were planned.'),
+        coachPrompt: normalizedSteps.length === 0 ? parsed.coachPrompt || input : parsed.coachPrompt || null,
+        steps: normalizedSteps,
+      };
+    } catch (error) {
+      console.error('[AI Planner] Failed to build command plan', error);
+      return localPlan;
     }
   },
 
@@ -305,23 +402,43 @@ Diary Themes (last 7 days): ${themes.join(', ')}
 
   getScheduleSummary: (_date?: string): string => {
     try {
-      const { activityRepo } = require('../../db/repositories');
+      const { activityRepo, calendarCacheRepo, taskRepo } = require('../../db/repositories');
       const blocks = activityRepo.getTodaysBlocks();
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      end.setMilliseconds(end.getMilliseconds() - 1);
+      const calendarEvents = calendarCacheRepo.listRange(start.toISOString(), end.toISOString());
+      const tasks = taskRepo.query({
+        startAt: start.toISOString(),
+        endAt: end.toISOString(),
+      });
       const normalizedBlocks = normaliseBlocksForCoach(blocks);
 
-      if (!blocks.length) {
+      if (!blocks.length && !calendarEvents.length && !tasks.length) {
         return 'You have no scheduled blocks today.';
       }
 
-      const preview = normalizedBlocks
+      const blockPreview = normalizedBlocks
+        .slice(0, 2)
+        .map((block: any) => `block ${block.title} at ${block.startsAtLocal}`);
+      const calendarPreview = calendarEvents
+        .slice(0, 2)
+        .map((event: any) => `event ${event.title} at ${formatTimeLabel(event.startAt)}`);
+      const taskPreview = tasks
+        .slice(0, 2)
+        .map((task: any) => `task ${task.title} at ${formatTimeLabel(task.dueAt)}`);
+
+      const preview = [...blockPreview, ...calendarPreview, ...taskPreview]
         .slice(0, 4)
-        .map((block: any) => `${block.title} at ${block.startsAtLocal}`)
         .join(', ');
 
       const nextUpcoming = normalizedBlocks.find(
         (block: any) => typeof block.minutesUntilStart === 'number' && block.minutesUntilStart >= 0
       );
-      const remainingCount = normalizedBlocks.length - Math.min(normalizedBlocks.length, 4);
+      const totalCount = blocks.length + calendarEvents.length + tasks.length;
+      const remainingCount = totalCount - Math.min(totalCount, 4);
       const nextPrefix = nextUpcoming
         ? `Next is ${nextUpcoming.title} ${nextUpcoming.relativeStart} at ${nextUpcoming.startsAtLocal}. `
         : '';
@@ -811,6 +928,221 @@ const buildMomentumInsightFallback = (
   ];
 
   return { explanation, actions };
+};
+
+const normalizePlannedSteps = (
+  steps: Array<{
+    namespace: CommandStep['namespace'];
+    command: string;
+    humanSummary?: string;
+    params?: Record<string, unknown>;
+    dependsOn?: string[];
+  }>,
+  runId: string
+): CommandStep[] => {
+  return steps
+    .map((step, index) =>
+      withCommandDefaults({
+        id: `${runId}-step-${index + 1}`,
+        namespace: step.namespace,
+        command: step.command,
+        humanSummary: step.humanSummary?.trim() || `${step.namespace}.${step.command}`,
+        params: step.params || {},
+        dependsOn: Array.isArray(step.dependsOn) ? step.dependsOn : [],
+      })
+    )
+    .filter((step): step is CommandStep => !!step);
+};
+
+const splitUserRequest = (input: string): string[] => {
+  return input
+    .split(/\b(?:and then|then|also)\b|,\s+|\s+\band\b\s+(?=(?:text|call|open|launch|block|create|add|schedule|move|delete|remove|complete|check|show|what|find|set|remind)\b)|[.;]/i)
+    .map((part) => part.trim())
+    .filter(Boolean);
+};
+
+const extractContactQuery = (raw: string): string | undefined => {
+  const match = raw.match(/\b(?:text|sms|message|call)\s+([a-z][a-z\s'-]+)/i);
+  return match?.[1]?.trim();
+};
+
+const extractMessageBody = (raw: string): string | undefined => {
+  const match = raw.match(/\b(?:that|saying|message)\s+(.+)$/i);
+  return match?.[1]?.trim();
+};
+
+const extractAppQuery = (raw: string): string | undefined => {
+  const lower = raw.toLowerCase();
+  const knownApps = ['instagram', 'youtube', 'tiktok', 'reddit', 'spotify', 'whatsapp', 'gmail', 'chrome', 'maps'];
+  return knownApps.find((app) => lower.includes(app));
+};
+
+const buildLocalStep = (
+  rawInput: string,
+  runId: string,
+  index: number
+): CommandStep | null => {
+  const raw = rawInput.trim();
+  const lower = raw.toLowerCase();
+
+  const addStep = (
+    namespace: CommandStep['namespace'],
+    command: string,
+    humanSummary: string,
+    params: Record<string, unknown>
+  ): CommandStep | null =>
+    withCommandDefaults({
+      id: `${runId}-step-${index + 1}`,
+      namespace,
+      command,
+      humanSummary,
+      params,
+      dependsOn: [],
+    });
+
+  if (isSchedulePrompt(lower)) {
+    return addStep('insight', 'schedule_query', 'Check your schedule', {
+      date: lower.includes('tomorrow') ? 'tomorrow' : 'today',
+    });
+  }
+
+  if (isDriftPrompt(lower)) {
+    return addStep('insight', 'drift_query', 'Check your drift summary', {});
+  }
+
+  if (lower.includes('sleep')) {
+    return addStep('insight', 'sleep_query', 'Check your sleep data', {});
+  }
+
+  const statusIntent = detectStatusIntent(lower);
+  if (statusIntent) {
+    const command =
+      statusIntent === 'done'
+        ? 'mark_done'
+        : statusIntent === 'deferred'
+          ? 'mark_deferred'
+          : 'mark_skipped';
+    return addStep('activity', command, `Update ${extractActivityTitleQuery(raw) || 'current block'}`, {
+      status: statusIntent,
+      targetRef: detectActivityTargetRef(lower),
+      titleQuery: extractActivityTitleQuery(raw),
+      rawText: raw,
+    });
+  }
+
+  if (/\b(move|reschedule|shift)\b/.test(lower) && /\b(block|activity)\b/.test(lower)) {
+    return addStep('activity', 'reschedule', 'Reschedule a DayOS block', {
+      targetRef: detectActivityTargetRef(lower),
+      titleQuery: extractActivityTitleQuery(raw),
+      rawText: raw,
+      dateTimePhrase: extractReschedulePhrase(raw),
+    });
+  }
+
+  if (lower.startsWith('remind me') || lower.includes('task') || lower.includes('todo')) {
+    return addStep('task', 'create', 'Create a task', {
+      title: extractReminderText(raw),
+      dueAt: extractTimePhrase(raw),
+      notes: lower.includes('about ') ? raw.split(/about /i)[1] : undefined,
+    });
+  }
+
+  if (/\bcomplete\b/.test(lower) && /\btask\b/.test(lower)) {
+    return addStep('task', 'complete', 'Complete a task', {
+      titleQuery: extractReminderText(raw),
+    });
+  }
+
+  if (/\b(delete|remove)\b/.test(lower) && /\btask\b/.test(lower)) {
+    return addStep('task', 'delete', 'Delete a task', {
+      titleQuery: extractReminderText(raw),
+    });
+  }
+
+  if (
+    /\b(add|create|schedule|put)\b/.test(lower) &&
+    (lower.includes('calendar') || lower.includes('event') || lower.includes('meeting'))
+  ) {
+    return addStep('calendar', 'create_event', 'Create a calendar event', {
+      title: extractCalendarTitle(raw),
+      startAt: extractTimePhrase(raw),
+      endAt: extractTimePhrase(raw),
+    });
+  }
+
+  if (/\b(move|reschedule)\b/.test(lower) && /\b(meeting|event|calendar)\b/.test(lower)) {
+    return addStep('calendar', 'update_event', 'Move a calendar event', {
+      titleQuery: extractCalendarTitle(raw),
+      startAt: extractReschedulePhrase(raw),
+      patch: {
+        startAt: extractReschedulePhrase(raw),
+      },
+    });
+  }
+
+  if (/\b(delete|remove|cancel)\b/.test(lower) && /\b(meeting|event|calendar)\b/.test(lower)) {
+    return addStep('calendar', 'delete_event', 'Delete a calendar event', {
+      titleQuery: extractCalendarTitle(raw),
+    });
+  }
+
+  if (lower.startsWith('text ') || lower.startsWith('sms ') || lower.startsWith('message ')) {
+    return addStep('communication', 'sms.draft', 'Draft an SMS', {
+      contactQuery: extractContactQuery(raw),
+      body: extractMessageBody(raw) || raw,
+    });
+  }
+
+  if (lower.startsWith('call ')) {
+    return addStep('communication', 'call.dial', 'Open the dialer', {
+      contactQuery: extractContactQuery(raw),
+    });
+  }
+
+  if (/\b(block|lock|stop)\b/.test(lower) && !!extractAppQuery(raw)) {
+    return addStep('app', 'block', 'Save an app block rule', {
+      appQuery: extractAppQuery(raw),
+      durationMinutes: extractDurationMinutes(lower),
+      reason: raw,
+    });
+  }
+
+  if ((/\b(open|launch)\b/.test(lower) && !!extractAppQuery(raw)) || lower.startsWith('start ')) {
+    return addStep('app', 'launch', 'Launch an app', {
+      appQuery: extractAppQuery(raw) || raw.replace(/^(open|launch|start)\s+/i, '').trim(),
+    });
+  }
+
+  if (lower.includes('permission') || lower.includes('setup')) {
+    return addStep('permission', 'setup_check', 'Check Android permissions', {});
+  }
+
+  if (
+    lower.includes('heading to') ||
+    lower.includes('going to') ||
+    lower.includes('check me in')
+  ) {
+    return addStep('activity', 'checkin', 'Check in to a DayOS block', {
+      targetActivity: extractActivityTarget(raw),
+      titleQuery: extractActivityTarget(raw),
+    });
+  }
+
+  return null;
+};
+
+const buildLocalCommandPlan = (input: string): CommandPlan => {
+  const runId = createAssistantId('run');
+  const steps = splitUserRequest(input)
+    .map((part, index) => buildLocalStep(part, runId, index))
+    .filter((step): step is CommandStep => !!step);
+
+  return {
+    runId,
+    summary: steps.length > 0 ? 'Working on your request.' : 'No device commands were planned.',
+    coachPrompt: steps.length > 0 ? null : input,
+    steps,
+  };
 };
 
 const buildLocalIntent = (transcribedText: string): { intent: string; params: any } => {

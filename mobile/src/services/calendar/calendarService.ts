@@ -251,8 +251,8 @@ export const calendarService = {
       title: params.patch.title,
       startDate: params.patch.startAt ? toDate(params.patch.startAt) : undefined,
       endDate: params.patch.endAt ? toDate(params.patch.endAt) : undefined,
-      notes: params.patch.notes === undefined ? undefined : params.patch.notes,
-      location: params.patch.location === undefined ? undefined : params.patch.location,
+      notes: params.patch.notes ?? undefined,
+      location: params.patch.location ?? undefined,
       allDay: params.patch.allDay,
     });
 

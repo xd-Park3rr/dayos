@@ -42,7 +42,7 @@ export function HomeScreen() {
             </View>
             <TouchableOpacity
               style={styles.settingsBtn}
-              onPress={() => navigation.navigate('BluetoothMappingScreen')}
+              onPress={() => navigation.navigate('Settings')}
             >
               <Text style={styles.settingsIcon}>CFG</Text>
             </TouchableOpacity>

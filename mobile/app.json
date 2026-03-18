@@ -11,15 +11,14 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "ios": {
-      "supportsTablet": true,
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "DayOS uses the microphone for wake-word detection and voice commands."
-      }
-    },
     "android": {
       "permissions": [
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "READ_CALENDAR",
+        "WRITE_CALENDAR",
+        "READ_CONTACTS",
+        "POST_NOTIFICATIONS",
+        "SYSTEM_ALERT_WINDOW"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -30,13 +29,12 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.dayos"
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
     "plugins": [
       "expo-sqlite",
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      "expo-contacts",
+      "expo-notifications"
     ]
   }
 }

@@ -20,9 +20,11 @@ import { screentimeService } from './src/services/screentime/screentimeService';
 import { bluetoothContext } from './src/services/context/bluetoothContext';
 import { contextEngine } from './src/services/context/contextEngine';
 import { BluetoothMappingScreen } from './src/features/settings/BluetoothMappingScreen';
+import { SettingsScreen } from './src/features/settings/SettingsScreen';
 import { jarvisService } from './src/services/ai/jarvisService';
 import { MomentumDetailScreen } from './src/features/momentum/MomentumDetailScreen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { taskNotificationService } from './src/services/task/taskNotificationService';
 
 import { 
   useFonts, 
@@ -55,7 +57,8 @@ export default function App() {
         hydrateChat();
         consequenceEngine.start();
         screentimeService.startMonitoring();
-        void calendarService.syncGoogleCalendar();
+        await taskNotificationService.initialize();
+        void calendarService.syncCalendarCache();
         bluetoothContext.startMonitoring();
         contextEngine.start();
         await jarvisService.initialize();
@@ -96,6 +99,7 @@ export default function App() {
               <Stack.Screen name="Chat" component={ChatScreen} />
               <Stack.Screen name="MomentumDetail" component={MomentumDetailScreen} />
               <Stack.Screen name="CategoryEditor" component={CategoryEditor} />
+              <Stack.Screen name="Settings" component={SettingsScreen} />
               <Stack.Screen name="BluetoothMappingScreen" component={BluetoothMappingScreen} />
             </Stack.Group>
           )}

@@ -94,7 +94,7 @@ export interface AssistantCapability {
 
 export interface PlanExecutionResult {
   runId: string;
-  status: 'completed' | 'partial' | 'awaiting_confirmation' | 'failed' | 'cancelled';
+  status: 'pending' | 'completed' | 'partial' | 'awaiting_confirmation' | 'failed' | 'cancelled';
   reply: string;
   stepResults: StepResult[];
   pendingConfirmation: boolean;
